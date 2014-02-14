@@ -109,7 +109,7 @@ MODULE_PARM_DESC(vl_untag,      " Enable vlan untagging (default=0)");
 
 
 inline
-bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, unsigned long sock_queue, struct pfq_queue_skb *skbs, int gid)
+bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, u64 sock_queue, struct pfq_queue_skb *skbs, int gid)
 {
         /* enqueue the sk_buff: it's wait-free. */
 
@@ -137,7 +137,7 @@ bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, unsigned long sock_qu
 /* send this packet to selected sockets */
 
 inline
-void pfq_sock_mask_to_queue(unsigned long j, unsigned long mask, unsigned long *sock_queue)
+void pfq_sock_mask_to_queue(unsigned long j, unsigned long mask, u64 *sock_queue)
 {
 	unsigned long bit;
        	bitwise_foreach(mask, bit)
@@ -232,7 +232,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
         struct local_data * local = __this_cpu_ptr(cpu_data);
         struct pfq_queue_skb * prefetch_queue = &local->prefetch_queue;
         unsigned long group_mask, socket_mask;
-        unsigned long sock_queue[sizeof(unsigned long) << 3];
+        u64 sock_queue[sizeof(unsigned long) << 3];
         struct pfq_annotation *cb;
         long unsigned n, bit, lb;
         int cpu;
