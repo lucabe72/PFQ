@@ -49,11 +49,7 @@ struct netdev_queue *pfq_pick_tx(struct net_device *dev, struct sk_buff *skb, in
 {
         if (dev->real_num_tx_queues != 1 && queue_index == -1)
         {
-                const struct net_device_ops *ops = dev->netdev_ops;
-                if (ops->ndo_select_queue)
-                        queue_index = ops->ndo_select_queue(dev, skb);
-                else
-                        queue_index = __netdev_pick_tx(dev, skb);
+		queue_index = 0;
         }
 
         queue_index = pfq_dev_cap_txqueue(dev, queue_index);
