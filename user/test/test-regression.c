@@ -83,6 +83,25 @@ void test_caplen()
 }
 
 
+void test_maxlen()
+{
+	pfq_t * q = pfq_open(64, 0, 1024);
+        assert(q);
+
+	assert(pfq_get_maxlen(q) == 64);
+	assert(pfq_set_maxlen(q, 128) == 0);
+	assert(pfq_get_maxlen(q) == 128);
+
+	assert(pfq_enable(q) == 0);
+	assert(pfq_set_maxlen(q, 10) == -1);
+	assert(pfq_disable(q) == 0);
+
+	assert(pfq_set_maxlen(q, 64) == 0);
+	assert(pfq_get_maxlen(q) == 64);
+
+	pfq_close(q);
+}
+
 void test_offset()
 {
 	pfq_t * q = pfq_open(64, 0, 1024);
@@ -100,31 +119,49 @@ void test_offset()
 	pfq_close(q);
 }
 
-void test_slots()
+void test_rx_slots()
 {
 	pfq_t * q = pfq_open(64, 0, 1024);
         assert(q);
 
-	assert(pfq_get_slots(q) == 1024);
+	assert(pfq_get_rx_slots(q) == 1024);
 
 	assert(pfq_enable(q) == 0);
-	assert(pfq_set_slots(q, 4096) == -1);
+	assert(pfq_set_rx_slots(q, 4096) == -1);
 	assert(pfq_disable(q) == 0);
 
-	assert(pfq_set_slots(q, 4096) == 0);
-	assert(pfq_get_slots(q) == 4096);
+	assert(pfq_set_rx_slots(q, 4096) == 0);
+	assert(pfq_get_rx_slots(q) == 4096);
 
 	pfq_close(q);
 }
 
-void test_slot_size()
+
+void test_tx_slots()
+{
+	pfq_t * q = pfq_open(64, 0, 1024);
+        assert(q);
+
+	assert(pfq_get_tx_slots(q) == 1024);
+
+	assert(pfq_enable(q) == 0);
+	assert(pfq_set_tx_slots(q, 4096) == -1);
+	assert(pfq_disable(q) == 0);
+
+	assert(pfq_set_tx_slots(q, 4096) == 0);
+	assert(pfq_get_tx_slots(q) == 4096);
+
+	pfq_close(q);
+}
+
+
+void test_rx_slot_size()
 {
 	pfq_t * q = pfq_open(64, 0, 1024);
         assert(q);
         size_t size = 64 + sizeof(struct pfq_pkt_hdr);
-	assert(pfq_get_slot_size(q) == (size + (size % 8)));
+	assert(pfq_get_rx_slot_size(q) == (size + (size % 8)));
 	pfq_close(q);
-
 }
 
 
@@ -543,53 +580,133 @@ void test_group_context()
         assert(pfq_get_group_function_context(q, pfq_group_id(q), &m, sizeof(m), 0) == 0);
 
         assert(n == m);
+
+	pfq_close(q);
 }
 
+
+void test_bind_tx()
+{
+        pfq_t * q = pfq_open(64, 0, 1024);
+
+        assert(pfq_bind_tx(q, "lo", -1) == 0);
+        assert(pfq_bind_tx(q, "unknown", -1) == -1);
+
+        pfq_close(q);
+}
+
+
+void test_start_tx_thread()
+{
+        pfq_t * q = pfq_open(64, 0, 1024);
+        assert(pfq_start_tx_thread(q, 0) == -1);
+
+        assert(pfq_bind_tx(q, "lo", -1) == 0);
+        assert(pfq_enable(q) == 0);
+
+        assert(pfq_start_tx_thread(q, 0) == 0);
+
+        pfq_close(q);
+}
+
+
+void test_stop_tx_thread()
+{
+        pfq_t * q = pfq_open(64, 0, 1024);
+        assert(pfq_stop_tx_thread(q) == -1);
+
+        assert(pfq_bind_tx(q, "lo", -1) == 0);
+        assert(pfq_enable(q) == 0);
+
+        assert(pfq_start_tx_thread(q, 0) == 0);
+        assert(pfq_stop_tx_thread(q) == 0);
+
+        pfq_close(q);
+}
+
+
+void test_wakeup_tx_thread()
+{
+        pfq_t * q = pfq_open(64, 0, 1024);
+        assert(pfq_wakeup_tx_thread(q) == -1);
+
+        assert(pfq_bind_tx(q, "lo", -1) == 0);
+        assert(pfq_enable(q) == 0);
+
+        assert(pfq_start_tx_thread(q, 0) == 0);
+        assert(pfq_wakeup_tx_thread(q) == 0);
+
+        pfq_close(q);
+}
+
+
+void test_tx_queue_flush()
+{
+        pfq_t * q = pfq_open(64, 0, 1024);
+        assert(pfq_tx_queue_flush(q) == -1);
+
+        assert(pfq_bind_tx(q, "lo", -1) == 0);
+        assert(pfq_enable(q) == 0);
+
+        assert(pfq_tx_queue_flush(q) == 0);
+
+        pfq_close(q);
+}
+
+#define TEST(test)   fprintf(stdout, "running '%s'...\n", #test); test();
 
 int
 main(int argc __attribute__((unused)), char *argv[]__attribute__((unused)))
 {
-	test_enable_disable();
+        TEST(test_enable_disable);
 
-	test_is_enabled();
-	test_ifindex();
-	test_timestamp();
-	test_caplen();
-        test_offset();
-	test_slots();
-	test_slot_size();
+	TEST(test_is_enabled);
+	TEST(test_ifindex);
+	TEST(test_timestamp);
+	TEST(test_caplen);
+	TEST(test_maxlen);
+        TEST(test_offset);
+	TEST(test_rx_slots);
+	TEST(test_rx_slot_size);
+	TEST(test_tx_slots);
 
-	test_bind_device();
-	test_unbind_device();
+	TEST(test_bind_device);
+	TEST(test_unbind_device);
 
-	test_poll();
+	TEST(test_poll);
 
-	test_read();
+	TEST(test_read);
 
-	test_stats();
-	test_group_stats();
+	TEST(test_stats);
+	TEST(test_group_stats);
 
-        test_my_group_stats_priv();
-	test_my_group_stats_restricted();
-	test_my_group_stats_shared();
+        TEST(test_my_group_stats_priv);
+	TEST(test_my_group_stats_restricted);
+	TEST(test_my_group_stats_shared);
 
-	test_groups_mask();
+	TEST(test_groups_mask);
 
-	test_join_private_();
-	test_join_restricted_();
-	test_join_shared_();
+	TEST(test_join_private_);
+	TEST(test_join_restricted_);
+	TEST(test_join_shared_);
 
-	test_join_deferred();
-	test_join_restricted();
-	test_join_restricted_thread();
-	test_join_restricted_process();
+	TEST(test_join_deferred);
+	TEST(test_join_restricted);
+	TEST(test_join_restricted_thread);
+	TEST(test_join_restricted_process);
 
-	test_join_group();
-	test_leave_group();
+	TEST(test_join_group);
+	TEST(test_leave_group);
 
-        test_vlan();
+        TEST(test_vlan);
 
-        test_group_context();
+        TEST(test_group_context);
+
+        TEST(test_bind_tx);
+        TEST(test_start_tx_thread);
+        TEST(test_stop_tx_thread);
+        TEST(test_wakeup_tx_thread);
+        TEST(test_tx_queue_flush);
 
         printf("Tests successfully passed.\n");
     	return 0;

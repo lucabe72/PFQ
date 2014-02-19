@@ -170,15 +170,23 @@ extern int pfq_set_caplen(pfq_t *q, size_t value);
 
 extern ssize_t pfq_get_caplen(pfq_t const *q);
 
+extern int pfq_set_maxlen(pfq_t *q, size_t value);
+
+extern ssize_t pfq_get_maxlen(pfq_t const *q);
+
 extern int pfq_set_offset(pfq_t *q, size_t value);
 
 extern ssize_t pfq_get_offset(pfq_t const *q);
 
-extern int pfq_set_slots(pfq_t *q, size_t value);
+extern int pfq_set_rx_slots(pfq_t *q, size_t value);
 
-extern size_t pfq_get_slots(pfq_t const *q);
+extern size_t pfq_get_rx_slots(pfq_t const *q);
 
-extern size_t pfq_get_slot_size(pfq_t const *q);
+extern int pfq_set_tx_slots(pfq_t *q, size_t value);
+
+extern size_t pfq_get_tx_slots(pfq_t const *q);
+
+extern size_t pfq_get_rx_slot_size(pfq_t const *q);
 
 extern int pfq_bind_group(pfq_t *q, int gid, const char *dev, int queue);
 
@@ -194,7 +202,7 @@ extern int pfq_set_group_function(pfq_t *q, int gid, const char *fun_name, int l
 
 extern int pfq_set_group_function_context(pfq_t *q, int gid, const void *context, size_t size, int level);
 
-extern int pfq_get_group_function_context(pfq_t *q, int gid, void *context, size_t size, int level);
+extern int pfq_get_group_function_context(pfq_t const *q, int gid, void *context, size_t size, int level);
 
 extern int pfq_group_reset(pfq_t *q, int gid);
 
@@ -229,11 +237,29 @@ extern int pfq_id(pfq_t *q);
 
 extern int pfq_group_id(pfq_t *q);
 
-extern int pfq_get_fd(pfq_t *q);
+extern int pfq_get_fd(pfq_t const *q);
 
 extern int pfq_get_stats(pfq_t const *q, struct pfq_stats *stats);
 
 extern int pfq_get_group_stats(pfq_t const *q, int gid, struct pfq_stats *stats);
+
+/* TX APIs */
+
+extern int pfq_bind_tx(pfq_t *q, const char *dev, int queue);
+
+extern int pfq_inject(pfq_t *q, const void *ptr, size_t len);
+
+extern int pfq_start_tx_thread(pfq_t *q, int node);
+
+extern int pfq_stop_tx_thread(pfq_t *q);
+
+extern int pfq_wakeup_tx_thread(pfq_t *q);
+
+extern int pfq_tx_queue_flush(pfq_t *q);
+
+extern int pfq_send(pfq_t *q, const void *ptr, size_t len);
+
+extern int pfq_send_async(pfq_t *q, const void *ptr, size_t len);
 
 
 #endif /* _PFQ_H_ */
