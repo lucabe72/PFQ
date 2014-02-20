@@ -25,6 +25,7 @@
 #ifndef _PF_Q_MEMORY_H_
 #define _PF_Q_MEMORY_H_
 
+#include <linux/version.h>
 #include <linux/skbuff.h>
 
 #include <pf_q-common.h>
@@ -77,8 +78,10 @@ bool pfq_skb_is_recycleable(const struct sk_buff *skb)
     // if (irqs_disabled())
     //    return false;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,1,0))
     if (skb_shinfo(skb)->tx_flags & SKBTX_DEV_ZEROCOPY)
         return false;
+#endif
 
     if (skb_is_nonlinear(skb) || skb->fclone != SKB_FCLONE_UNAVAILABLE)
         return false;

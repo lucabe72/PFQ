@@ -27,13 +27,13 @@
 
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kthread.h>
 
 #include <pf_q-memory.h>
 #include <pf_q-sock.h>
 #include <pf_q-transmit.h>
-
 #include <pf_q-common.h>
 
 int
@@ -119,22 +119,23 @@ int
 pfq_tx_thread(void *data)
 {
         struct pfq_sock *so = (struct pfq_sock *)data;
-        struct pfq_tx_opt *to = &so->tx_opt;
         struct net_device *dev;
 
-        printk(KERN_INFO "[PFQ] TX thread started on node %d\n", to->cpu_index);
+        printk(KERN_INFO "[PFQ|T] TX thread started on node %d\n", so->tx_opt.cpu_index);
 
-        dev = dev_get_by_index(sock_net(&so->sk), to->if_index);
+        dev = dev_get_by_index(sock_net(&so->sk), so->tx_opt.if_index);
 
-        while(!kthread_should_stop())
+        for(;;)
         {
-                pfq_tx_queue_flush(to, dev);
+                pfq_tx_queue_flush(&so->tx_opt, dev);
                 set_current_state(TASK_INTERRUPTIBLE);
+                if (kthread_should_stop())
+                        break;
                 schedule();
         }
 
         dev_put(dev);
 
-        printk(KERN_INFO "[PFQ] TX thread stopped.\n");
+        printk(KERN_INFO "[PFQ|T] TX thread stopped.\n");
         return 0;
 }
