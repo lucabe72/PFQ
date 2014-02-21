@@ -40,10 +40,10 @@
 #include <unistd.h>
 #include <stdint.h>
 
-inline void barrier() { asm volatile ("" ::: "memory"); }
+static inline void barrier() { asm volatile ("" ::: "memory"); }
 
 #if defined(__i386__) && !defined(__LP64__)
-#error "32-bit architecture is not supported"
+#warning "32-bit architecture is not supported"
 #endif
 
 #if defined(__LP64__)
@@ -52,15 +52,9 @@ inline void rmb() { asm volatile ("lfence" ::: "memory"); }
 inline void wmb() { asm volatile ("sfence" ::: "memory"); }
 #endif
 
-#ifdef CONFIG_SMP
-inline void smp_mb()  { mb(); }
-inline void smp_rmb() { barrier(); }
-inline void smp_wmb() { barrier(); }
-#else
-inline void smp_mb()  { barrier(); }
-inline void smp_rmb() { barrier(); }
-inline void smp_wmb() { barrier(); }
-#endif
+#define wmb() asm   __volatile__ ("" ::: "memory") 
+#define smp_wmb() asm   __volatile__ ("" ::: "memory") 
+#define smp_rmb() asm   __volatile__ ("" ::: "memory") 
 
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
