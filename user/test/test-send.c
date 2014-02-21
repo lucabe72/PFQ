@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -66,10 +67,24 @@ void mode_3(pfq_t *q, int num)
         }
 }
 
+static unsigned long long int gettime(void)
+{
+  unsigned long long int res;
+  struct timeval tv;
+
+  gettimeofday(&tv, NULL);
+  res  = tv.tv_sec;
+  res *= 1000000;
+  res += tv.tv_usec;
+
+  return res;
+}
 
 int
 main(int argc, char *argv[])
 {
+	unsigned long long int t1, t2;
+
         if (argc < 4)
         {
                 fprintf(stderr, "usage: %s dev num mode\n", argv[0]);
@@ -89,6 +104,7 @@ main(int argc, char *argv[])
 
         pfq_start_tx_thread(q, 0);
 
+        t1 = gettime();
         switch(mode)
         {
         case 0: mode_0(q, num); break;
@@ -99,13 +115,14 @@ main(int argc, char *argv[])
                 fprintf(stderr, "error: unknown mode\n");
                 return -1;
         }
+        t2 = gettime();
 
         sleep(1);
 
         pfq_stop_tx_thread(q);
 
         pfq_close(q);
-
+        printf("Sent %d packets in %llu: %llu pps\n", num, t2-t1, (unsigned long long int)num * 1000000ull / (t2 - t1));
         return 0;
 }
 
