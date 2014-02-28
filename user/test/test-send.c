@@ -24,46 +24,50 @@ static const unsigned char ping[98] =
 };
 
 
-void mode_0(pfq_t *q, int num)
+void mode_0(pfq_t *q, unsigned long long num)
 {
-        int n;
-        for(n = 0; n < num; ++n)
+        unsigned long long n;
+        for(n = 0; n < num;)
         {
-                pfq_inject(q, ping, sizeof(ping));
+                if (pfq_inject(q, ping, sizeof(ping)) == 0)
+			n++;
 
                 pfq_tx_queue_flush(q);
         }
 }
 
-void mode_1(pfq_t *q, int num)
+void mode_1(pfq_t *q, unsigned long long num)
 {
-        int n;
-        for(n = 0; n < num; ++n)
+        unsigned long long n;
+        for(n = 0; n < num;)
         {
-                pfq_inject(q, ping, sizeof(ping));
+                if (pfq_inject(q, ping, sizeof(ping)) == 0)
+			n++;
 
                 pfq_wakeup_tx_thread(q);
         }
 }
 
-void mode_2(pfq_t *q, int num)
+void mode_2(pfq_t *q, unsigned long long num)
 {
-        int n;
-        for(n = 0; n < num; ++n)
+        unsigned long long n;
+        for(n = 0; n < num;)
         {
-                pfq_send_async(q, ping, sizeof(ping));
+                if (pfq_send_async(q, ping, sizeof(ping)) == 0)
+			n++;
         }
 
         pfq_wakeup_tx_thread(q);
 }
 
 
-void mode_3(pfq_t *q, int num)
+void mode_3(pfq_t *q, unsigned long long num)
 {
-        int n;
-        for(n = 0; n < num; ++n)
+        unsigned long long n;
+        for(n = 0; n < num;)
         {
-                pfq_send(q, ping, sizeof(ping));
+                if (pfq_send(q, ping, sizeof(ping)) == 0)
+			n++;
         }
 }
 
@@ -85,24 +89,26 @@ main(int argc, char *argv[])
 {
 	unsigned long long int t1, t2;
 
-        if (argc < 4)
+        if (argc < 6)
         {
-                fprintf(stderr, "usage: %s dev num mode\n", argv[0]);
+                fprintf(stderr, "usage: %s dev queue node num mode\n", argv[0]);
                 return -1;
         }
 
         const char *dev = argv[1];
 
-        int num  = atoi(argv[2]);
-        int mode = atoi(argv[3]);
+        int queue  = atoi(argv[2]);
+        int node   = atoi(argv[3]);
+        unsigned long long num = atoll(argv[4]);
+        int mode   = atoi(argv[5]);
 
         pfq_t * q= pfq_open(128, 0, 4096);
 
         pfq_enable(q);
 
-        pfq_bind_tx(q, dev, -1);
+        pfq_bind_tx(q, dev, queue);
 
-        pfq_start_tx_thread(q, 0);
+        pfq_start_tx_thread(q, node);
 
         t1 = gettime();
         switch(mode)
@@ -120,6 +126,11 @@ main(int argc, char *argv[])
         sleep(1);
 
         pfq_stop_tx_thread(q);
+
+        struct pfq_stats stat;
+        pfq_get_stats(q, &stat);
+
+        fprintf(stdout, "sent: %lu - disc: %lu\n", stat.sent, stat.disc);
 
         pfq_close(q);
         printf("Sent %d packets in %llu: %llu pps\n", num, t2-t1, (unsigned long long int)num * 1000000ull / (t2 - t1));

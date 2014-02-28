@@ -21,33 +21,23 @@
  *
  ****************************************************************/
 
-#ifndef _PF_Q_GLOBAL_H_
-#define _PF_Q_GLOBAL_H_
+#ifndef _PF_Q_BITOPS_H_
+#define _PF_Q_BITOPS_H_
 
-#include <linux/types.h>
+#include <asm/bitops.h>
 
-extern atomic_t timestamp_toggle;
+#define pfq_ctz(n) \
+	__builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned int),        (unsigned int)__builtin_ctz(n), \
+        __builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned long),       (unsigned int)__builtin_ctzl(n), \
+        __builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned long long),  (unsigned int)__builtin_ctzll(n), (void)0 )))
 
-extern struct local_data __percpu * cpu_data;
+#define pfq_popcount(n) \
+        __builtin_choose_expr(sizeof(n) == sizeof(int),        (unsigned int)hweight32(n), \
+        __builtin_choose_expr(sizeof(n) == sizeof(long long),  (unsigned int)hweight64(n), (void)0 ))
 
-extern int direct_capture;
 
-extern int capture_incoming;
-extern int capture_outgoing;
-extern int capture_loopback;
+#define pfq_bitwise_foreach(mask, n) \
+	for(; n = mask & -mask, mask ; mask^=n)
 
-extern int tx_queue_slots;
-extern int rx_queue_slots;
 
-extern int cap_len;
-extern int max_len;
-
-extern int prefetch_len;
-extern int batch_len;
-
-extern int flow_control;
-extern int vl_untag;
-
-extern int recycle_len;
-
-#endif /* _PF_Q_GLOBAL_H_ */
+#endif /* _PF_Q_BITOPS_H_ */

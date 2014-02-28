@@ -453,7 +453,8 @@ namespace net {
             size_t rx_slots;
             size_t rx_slot_size;
 
-            size_t tx_slots;
+            size_t   tx_slots;
+            uint64_t tx_counter;
         };
 
         int fd_;
@@ -599,6 +600,7 @@ namespace net {
                                         0,
                                         0,
                                         offset,
+                                        0,
                                         0,
                                         0,
                                         0
@@ -1180,6 +1182,10 @@ namespace net {
             });
         }
 
+        //
+        // stats
+        //
+
         pfq_stats
         stats() const
         {
@@ -1220,7 +1226,9 @@ namespace net {
             return nullptr;
         }
 
-        /// TX API...
+        //
+        // TX API...
+        //
 
         void
         bind_tx(const char *dev, int queue = any_queue)
@@ -1245,19 +1253,18 @@ namespace net {
             return true;
         }
 
+
         bool
         send_async(const_buffer pkt)
         {
-            if (!inject(pkt))
-                return false;
+			auto ret = inject(pkt);
 
-            auto q  = static_cast<struct pfq_queue_hdr *>(pdata_->queue_addr);
-
-            if (pfq_spsc_write_avail(&q->tx) < static_cast<int>(tx_slots()/2) )
+            if ((pdata_->tx_counter ++ % 128) == 0)
                 wakeup_tx_thread();
 
-            return true;
+			return ret;
         }
+
 
         bool
         inject(const_buffer pkt)
@@ -1279,6 +1286,7 @@ namespace net {
             pfq_spsc_write_commit(tx);
             return true;
         }
+
 
         void start_tx_thread(int node)
         {
@@ -1311,7 +1319,7 @@ namespace net {
     typename std::basic_ostream<CharT, Traits> &
     operator<<(std::basic_ostream<CharT,Traits> &out, const pfq_stats& rhs)
     {
-        return out << rhs.recv << ' ' << rhs.lost << ' ' << rhs.drop;
+        return out << rhs.recv << ' ' << rhs.lost << ' ' << rhs.drop << ' ' << rhs.sent << ' ' << rhs.disc;
     }
 
     inline pfq_stats&
@@ -1320,6 +1328,10 @@ namespace net {
         lhs.recv += rhs.recv;
         lhs.lost += rhs.lost;
         lhs.drop += rhs.drop;
+
+        lhs.sent += rhs.sent;
+        lhs.disc += rhs.disc;
+
         return lhs;
     }
 
@@ -1329,6 +1341,10 @@ namespace net {
         lhs.recv -= rhs.recv;
         lhs.lost -= rhs.lost;
         lhs.drop -= rhs.drop;
+
+        lhs.sent -= rhs.sent;
+        lhs.disc -= rhs.disc;
+
         return lhs;
     }
 

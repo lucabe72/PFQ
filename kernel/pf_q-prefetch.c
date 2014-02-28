@@ -1,7 +1,6 @@
 /***************************************************************
  *
- * (C) 2011-13 Nicola Bonelli <nicola.bonelli@cnit.it>
- *             Andrea Di Pietro <andrea.dipietro@for.unipi.it>
+ * (C) 2014 Nicola Bonelli <nicola.bonelli@cnit.it>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,42 +21,43 @@
  *
  ****************************************************************/
 
-#ifndef _PF_Q_MPDB_QUEUE_H_
-#define _PF_Q_MPDB_QUEUE_H_
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/cpumask.h>
 
-#include <linux/skbuff.h>
 #include <linux/pf_q.h>
-#include <linux/if_vlan.h>
+#include <linux/pf_q-fun.h>
 
-#include <pf_q-non-intrusive.h>
-#include <pf_q-prefetch.h>
-#include <pf_q-common.h>
-#include <pf_q-sock.h>
+#include <pf_q-memory.h>
 
-
-extern bool   mpdb_enqueue(struct pfq_rx_opt *ro, struct sk_buff *skb);
-extern size_t mpdb_enqueue_batch(struct pfq_rx_opt *ro, unsigned long queue_mask, int len, struct pfq_non_intrusive_skb *skbs, int gid);
-
-
-static inline
-size_t mpdb_queue_len(struct pfq_sock *p)
+int pfq_prefetch_purge_all(void)
 {
-        return MPDB_QUEUE_LEN(get_pfq_queue_hdr(p)->rx.data);
+        int cpu;
+        int total = 0;
+
+        /* destroy prefetch queues (of each cpu) */
+
+        for_each_possible_cpu(cpu) {
+
+                struct local_data *local = per_cpu_ptr(cpu_data, cpu);
+                struct pfq_non_intrusive_skb *this_queue = &local->prefetch_queue;
+                struct sk_buff *skb;
+		int n = 0;
+
+		pfq_non_intrusive_for_each(skb, n, this_queue)
+		{
+                        struct pfq_annotation *cb = pfq_skb_annotation(skb);
+                        if (unlikely(cb->stolen_skb))
+                                continue;
+                 	kfree_skb(skb);
+		}
+
+                total += pfq_non_intrusive_len(this_queue);
+
+       		pfq_non_intrusive_flush(this_queue);
+        }
+
+        return total;
 }
 
 
-static inline
-int mpdb_queue_index(struct pfq_sock *p)
-{
-        return MPDB_QUEUE_INDEX(get_pfq_queue_hdr(p)->rx.data) & 1;
-}
-
-
-static inline
-size_t mpdb_queue_size(struct pfq_sock *p)
-{
-        struct pfq_rx_queue_hdr *rx = & get_pfq_queue_hdr(p)->rx;
-        return rx->size * rx->slot_size;
-}
-
-#endif /* _PF_Q_MPDB_QUEUE_H_ */

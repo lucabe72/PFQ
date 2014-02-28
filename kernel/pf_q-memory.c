@@ -26,15 +26,54 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 
-#include <pf_q-prefetch-queue.h>
+#include <pf_q-non-intrusive.h>
 #include <pf_q-memory.h>
+
+
+sparse_counter_t os_alloc;
+sparse_counter_t os_free;
+sparse_counter_t rc_alloc;
+sparse_counter_t rc_free;
+sparse_counter_t rc_error;
+
+
+struct pfq_recycle_stat
+pfq_get_recycle_stats(void)
+{
+        struct pfq_recycle_stat ret = { sparse_read(&os_alloc),
+                                        sparse_read(&os_free),
+                                        sparse_read(&rc_alloc),
+                                        sparse_read(&rc_free),
+                                        sparse_read(&rc_error)};
+        return ret;
+}
+
+
+void
+pfq_reset_recycle_stats(void)
+{
+        sparse_set(&os_alloc, 0);
+        sparse_set(&os_free, 0);
+        sparse_set(&rc_alloc, 0);
+        sparse_set(&rc_free, 0);
+        sparse_set(&rc_error, 0);
+}
+
 
 /* exported symbols */
 
 struct sk_buff *
 __pfq_alloc_skb(unsigned int size, gfp_t priority, int fclone, int node)
 {
-        return ____pfq_alloc_skb(size, priority, fclone, node);
+#ifdef PFQ_USE_SKB_RECYCLE
+        struct local_data *this_cpu = __this_cpu_ptr(cpu_data);
+
+        if (atomic_read(&this_cpu->enable_recycle))
+        {
+                return ____pfq_alloc_skb_recycle(size, priority, fclone, node, &this_cpu->rx_recycle_list);
+        }
+#endif
+        return __alloc_skb(size, priority, fclone, node);
 }
 
 

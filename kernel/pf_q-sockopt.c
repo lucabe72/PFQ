@@ -28,8 +28,8 @@
 #include <linux/kthread.h>
 #include <linux/pf_q.h>
 
+#include <pf_q-transmit.h>
 #include <pf_q-thread.h>
-#include <pf_q-common.h>
 #include <pf_q-global.h>
 #include <pf_q-sock.h>
 #include <pf_q-group.h>
@@ -143,6 +143,9 @@ int pfq_getsockopt(struct socket *sock,
                     stat.lost = sparse_read(&ro->stat.lost);
                     stat.drop = sparse_read(&ro->stat.drop);
 
+                    stat.sent = sparse_read(&to->stat.sent);
+                    stat.disc = sparse_read(&to->stat.disc);
+
                     if (copy_to_user(optval, &stat, sizeof(stat)))
                             return -EFAULT;
             } break;
@@ -240,6 +243,9 @@ int pfq_getsockopt(struct socket *sock,
                     stat.lost = sparse_read(&pfq_groups[gid].lost);
                     stat.drop = sparse_read(&pfq_groups[gid].drop);
 
+                    stat.sent = 0;
+                    stat.disc = 0;
+
                     if (copy_to_user(optval, &stat, sizeof(stat)))
                             return -EFAULT;
             } break;
@@ -322,7 +328,7 @@ int pfq_setsockopt(struct socket *sock,
 
                                     /* alloc queue memory */
 
-                                    if (pfq_queue_alloc(so, pfq_queue_total_mem(so)) < 0)
+                                    if (pfq_shared_queue_alloc(so, pfq_queue_total_mem(so)) < 0)
                                     {
                                         return -ENOMEM;
                                     }
@@ -381,7 +387,7 @@ int pfq_setsockopt(struct socket *sock,
 
                         msleep(Q_GRACE_PERIOD);
 
-                        pfq_queue_free(so);
+                        pfq_shared_queue_free(so);
                     }
 
             } break;
@@ -730,13 +736,11 @@ int pfq_setsockopt(struct socket *sock,
 
         case Q_SO_TX_THREAD_START:
         {
-                int node;
-
-                pr_devel("[PFQ|%d] starting TX thread...\n", so->id);
+                int cpu;
 
                 if (to->thread)
                 {
-                        pr_devel("[PFQ|%d] TX thread already created on node %d!\n", so->id, to->cpu_index);
+                        pr_devel("[PFQ|%d] TX thread already created on cpu %d:%d!\n", so->id, to->cpu, cpu_to_node(to->cpu));
                         return -EPERM;
                 }
                 if (to->if_index == -1)
@@ -750,29 +754,27 @@ int pfq_setsockopt(struct socket *sock,
                         return -EPERM;
                 }
 
-                if (optlen != sizeof(node))
+                if (optlen != sizeof(cpu))
                         return -EINVAL;
 
-                if (copy_from_user(&node, optval, optlen))
+                if (copy_from_user(&cpu, optval, optlen))
                         return -EFAULT;
 
-                to->cpu_index = node;
+                to->cpu = cpu;
 
-                pr_devel("[PFQ|%d] creating TX thread on node %d -> if_index:%d hw_queue:%d\n", so->id, to->cpu_index, to->if_index, to->hw_queue);
+                pr_devel("[PFQ|%d] creating TX thread on cpu %d:%d if_index:%d hw_queue:%d\n", so->id, to->cpu, cpu_to_node(to->cpu), to->if_index, to->hw_queue);
 
                 to->thread = kthread_create_on_node(pfq_tx_thread,
                                                     so,
-                                                    cpu_to_node(to->cpu_index),
-                                                    "pfq_tx_%d", to->cpu_index);
+                                                    cpu_to_node(to->cpu),
+                                                    "pfq_tx_%d", to->cpu);
 
                 if (IS_ERR(to->thread)) {
-                        printk(KERN_INFO "[PFQ] kernel_thread() create failed on node %d!\n", to->cpu_index);
+                        printk(KERN_INFO "[PFQ] kernel_thread() create failed on cpu %d:%d!\n", to->cpu, cpu_to_node(to->cpu));
                         return PTR_ERR(to->thread);
                 }
 
-                kthread_bind(to->thread, to->cpu_index);
-
-                pr_devel("[PFQ|%d] starting TX thread: done.\n", so->id);
+                kthread_bind(to->thread, to->cpu);
 
         } break;
 
@@ -841,7 +843,9 @@ int pfq_setsockopt(struct socket *sock,
                         return -EPERM;
                 }
 
-                pfq_tx_queue_flush(to, dev);
+                pfq_tx_queue_flush(to, dev, get_cpu(), NUMA_NO_NODE);
+                put_cpu();
+
                 dev_put(dev);
         } break;
 

@@ -28,7 +28,8 @@
 
 #include <pf_q-group.h>
 #include <pf_q-devmap.h>
-#include <pf_q-bits.h>
+#include <pf_q-bitops.h>
+
 
 DEFINE_SEMAPHORE(group_sem);
 
@@ -135,7 +136,7 @@ __pfq_group_dtor(int gid)
 
         that->vlan_filt = false;
 
-        pr_devel("[PFQ] group gid:%d destroyed.\n", gid);
+        pr_devel("[PFQ] group id:%d destroyed.\n", gid);
 }
 
 
@@ -154,7 +155,7 @@ __pfq_join_group(int gid, int id, unsigned long class_mask, int policy)
                 return -1;
         }
 
-        bitwise_foreach(class_mask, bit)
+        pfq_bitwise_foreach(class_mask, bit)
         {
                 int class = pfq_ctz(bit);
                 tmp = atomic_long_read(&pfq_groups[gid].sock_mask[class]);

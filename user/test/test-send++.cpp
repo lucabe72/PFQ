@@ -23,42 +23,48 @@ static const unsigned char ping[98] =
 };
 
 
-void mode_0(pfq &q, int num)
+void mode_0(pfq &q, uint64_t num)
 {
-    for(int n = 0; n < num; ++n)
+    for(uint64_t n = 0; n < num;)
     {
-        q.inject(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping)));
+        if (q.inject(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping))))
+            n++;
 
-        q.tx_queue_flush();
+        if ((n % 128) == 0)
+            q.tx_queue_flush();
     }
 }
 
-void mode_1(pfq &q, int num)
+void mode_1(pfq &q, uint64_t num)
 {
-    for(int n = 0; n < num; ++n)
+    for(uint64_t n = 0; n < num;)
     {
-        q.inject(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping)));
+        if (q.inject(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping))))
+            n++;
 
-        q.wakeup_tx_thread();
+        if ((n % 128) == 0)
+            q.wakeup_tx_thread();
     }
 }
 
-void mode_2(pfq &q, int num)
+void mode_2(pfq &q, uint64_t num)
 {
-    for(int n = 0; n < num; ++n)
+    for(uint64_t n = 0; n < num;)
     {
-        q.send_async(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping)));
+        if (q.send_async(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping))))
+            n++;
     }
 
     q.wakeup_tx_thread();
 }
 
 
-void mode_3(pfq &q, int num)
+void mode_3(pfq &q, uint64_t num)
 {
-    for(int n = 0; n < num; ++n)
+    for(uint64_t n = 0; n < num;)
     {
-        q.send(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping)));
+        if (q.send(net::const_buffer(reinterpret_cast<const char *>(ping), sizeof(ping))))
+            n++;
     }
 }
 
@@ -66,21 +72,22 @@ void mode_3(pfq &q, int num)
 int
 main(int argc, char *argv[])
 {
-    if (argc < 4)
-        throw std::runtime_error(std::string("usage: ").append(argv[0]).append(" dev num mode"));
+    if (argc < 6)
+        throw std::runtime_error(std::string("usage: ").append(argv[0]).append(" dev queue node num mode"));
 
     const char *dev = argv[1];
+    int queue       = atoi(argv[2]);
+    int node        = atoi(argv[3]);
+    uint64_t num    = atoll(argv[4]);
+    int mode        = atoi(argv[5]);
 
-    int num  = atoi(argv[2]);
-    int mode = atoi(argv[3]);
-
-    pfq q(128);
+    pfq q(64);
 
     q.enable();
 
-    q.bind_tx(dev, -1);
+    q.bind_tx(dev, queue);
 
-    q.start_tx_thread(0);
+    q.start_tx_thread(node);
 
     switch(mode)
     {

@@ -52,9 +52,9 @@
 #include <pf_q-sockopt.h>
 #include <pf_q-devmap.h>
 #include <pf_q-group.h>
-#include <pf_q-prefetch-queue.h>
+#include <pf_q-prefetch.h>
 #include <pf_q-functional.h>
-#include <pf_q-bits.h>
+#include <pf_q-bitops.h>
 #include <pf_q-bpf.h>
 #include <pf_q-memory.h>
 #include <pf_q-queue.h>
@@ -87,7 +87,10 @@ module_param(cap_len,         int, 0644);
 module_param(max_len,         int, 0644);
 module_param(rx_queue_slots,  int, 0644);
 module_param(tx_queue_slots,  int, 0644);
+
 module_param(prefetch_len,    int, 0644);
+module_param(batch_len,       int, 0644);
+
 module_param(recycle_len,     int, 0644);
 module_param(flow_control,    int, 0644);
 module_param(vl_untag,        int, 0644);
@@ -104,14 +107,24 @@ MODULE_PARM_DESC(max_len, " Maximum transmission length (bytes)");
 MODULE_PARM_DESC(rx_queue_slots, " Rx Queue slots (default=131072)");
 MODULE_PARM_DESC(tx_queue_slots, " Tx Queue slots (default=131072)");
 
-MODULE_PARM_DESC(prefetch_len,  " Prefetch queue length");
-MODULE_PARM_DESC(recycle_len,   " Recycle skb list (default=1024)");
+MODULE_PARM_DESC(prefetch_len,  " Rx prefetch queue length");
+MODULE_PARM_DESC(batch_len,     " Tx batch queue length");
+
+MODULE_PARM_DESC(recycle_len,   " Recycle skb list (default=16384)");
 MODULE_PARM_DESC(flow_control,  " Flow control value (default=0)");
 MODULE_PARM_DESC(vl_untag,      " Enable vlan untagging (default=0)");
 
 
+#ifdef PFQ_USE_SKB_RECYCLE
+#pragma message "[PFQ] *** using skb recycle ***"
+#endif
+
+
+DEFINE_SEMAPHORE(sock_sem);
+
+
 inline
-bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, u64 sock_queue, struct pfq_prefetch_skb *skbs, int gid)
+bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, u64 sock_queue, struct pfq_non_intrusive_skb *skbs, int gid)
 {
         /* enqueue the sk_buff: it's wait-free. */
 
@@ -124,11 +137,11 @@ bool pfq_copy_to_user_skbs(struct pfq_rx_opt *ro, int cpu, u64 sock_queue, struc
                 len  = (int)hweight64(sock_queue);
                 sent = mpdb_enqueue_batch(ro, sock_queue, len, skbs, gid);
 
-        	__sparse_add(&ro->stat.recv, cpu, sent);
+        	__sparse_add(&ro->stat.recv, sent, cpu);
 
 		if (len > sent)
 		{
-			__sparse_add(&ro->stat.lost, cpu, len - sent);
+			__sparse_add(&ro->stat.lost, len - sent, cpu);
 			return false;
 		}
         }
@@ -142,7 +155,7 @@ inline
 void pfq_sock_mask_to_queue(unsigned long j, unsigned long mask, u64 *sock_queue)
 {
 	unsigned long bit;
-       	bitwise_foreach(mask, bit)
+       	pfq_bitwise_foreach(mask, bit)
 	{
 	        int index = pfq_ctz(bit);
                 sock_queue[index] |= 1UL << j;
@@ -228,11 +241,12 @@ unsigned int pfq_fold(unsigned int a, unsigned int b)
         }
 }
 
+
 int
 pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 {
         struct local_data * local = __this_cpu_ptr(cpu_data);
-        struct pfq_prefetch_skb * prefetch_queue = &local->prefetch_queue;
+        struct pfq_non_intrusive_skb * prefetch_queue = &local->prefetch_queue;
         unsigned long group_mask, socket_mask;
         u64 sock_queue[sizeof(unsigned long) << 3];
         struct pfq_annotation *cb;
@@ -240,6 +254,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
         int cpu;
 
 #ifdef PFQ_USE_FLOW_CONTROL
+
 	/* flow control */
 
 	if (local->flowctrl &&
@@ -288,9 +303,9 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
         /* enqueue this skb ... */
 
-        pfq_prefetch_skb_push(prefetch_queue, skb);
+        pfq_non_intrusive_push(prefetch_queue, skb);
 
-        if (pfq_prefetch_skb_size(prefetch_queue) < prefetch_len) {
+        if (pfq_non_intrusive_len(prefetch_queue) < prefetch_len) {
                 return 0;
 	}
 
@@ -306,7 +321,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
         group_mask = 0;
 
-        queue_for_each(skb, n, prefetch_queue)
+        pfq_non_intrusive_for_each(skb, n, prefetch_queue)
         {
                 struct pfq_annotation *cb = pfq_skb_annotation(skb);
 		unsigned long local_group_mask = __pfq_devmap_get_groups(skb->dev->ifindex, skb_get_rx_queue(skb));
@@ -316,7 +331,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 		cb->group_mask = local_group_mask;
 	}
 
-        bitwise_foreach(group_mask, bit)
+        pfq_bitwise_foreach(group_mask, bit)
         {
 		int gid = pfq_ctz(bit);
 
@@ -326,7 +341,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
                 socket_mask = 0;
 
-        	queue_for_each(skb, n, prefetch_queue)
+        	pfq_non_intrusive_for_each(skb, n, prefetch_queue)
 		{
                 	struct pfq_annotation *cb = pfq_skb_annotation(skb);
 
@@ -366,8 +381,8 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
                                 /* reset state, index call and fun_ctx ptr */
 
-                                cb->index  =  -1;
-                                cb->state  =  0;
+                                cb->index   = -1;
+                                cb->state   =  0;
                                 cb->fun_ctx =  pfq_groups[gid].fun_ctx;
 
                                 ret = pfq_call(fun, skb, pass());
@@ -388,7 +403,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
                                         unsigned long eligible_mask = 0;
                                         unsigned long cbit;
 
-                                        bitwise_foreach(ret.class, cbit)
+                                        pfq_bitwise_foreach(ret.class, cbit)
                                         {
                                                 int cindex = pfq_ctz(cbit);
                                                 eligible_mask |= atomic_long_read(&pfq_groups[gid].sock_mask[cindex]);
@@ -406,7 +421,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
                                                         local->eligible_mask = eligible_mask;
                                                         local->sock_cnt = 0;
 
-                                                        bitwise_foreach(eligible_mask, ebit)
+                                                        pfq_bitwise_foreach(eligible_mask, ebit)
                                                         {
                                                                 local->sock_mask[local->sock_cnt++] = ebit;
                                                         }
@@ -431,7 +446,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
                 /* copy packets of this group to pfq sockets... */
 
-                bitwise_foreach(socket_mask, lb)
+                pfq_bitwise_foreach(socket_mask, lb)
                 {
                         int i = pfq_ctz(lb);
                         struct pfq_rx_opt * ro = &pfq_get_sock_by_id(i)->rx_opt;
@@ -456,7 +471,7 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
 
         /* free skb, or route them to kernel... */
 
-        queue_for_each(skb, n, prefetch_queue)
+        pfq_non_intrusive_for_each(skb, n, prefetch_queue)
         {
                 cb = pfq_skb_annotation(skb);
 
@@ -475,8 +490,9 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
                                 else
                                         napi_gro_receive(napi, skb);
                         }
-                        else {
-                                pfq_kfree_skb_recycle(skb, &local->recycle_list);
+                        else
+                        {
+                                pfq_kfree_skb_recycle(skb, &local->rx_recycle_list);
         		}
 		}
                 else
@@ -486,7 +502,10 @@ pfq_receive(struct napi_struct *napi, struct sk_buff *skb, int direct)
                 }
         }
 
-	pfq_prefetch_skb_flush(prefetch_queue);
+	pfq_non_intrusive_flush(prefetch_queue);
+
+	put_cpu();
+
         return 0;
 }
 
@@ -555,6 +574,7 @@ pfq_create(
         struct sock *sk;
 
         /* security and sanity check */
+
         if (!capable(CAP_NET_ADMIN))
                 return -EPERM;
         if (sock->type != SOCK_RAW)
@@ -594,6 +614,10 @@ pfq_create(
         so->mem_addr = NULL;
         so->mem_size = 0;
 
+        /* to protect pfq_prefetch_purge_all() */
+
+        down(&sock_sem);
+
         /* initialize both rx_opt and tx_opt */
 
         pfq_rx_opt_init(&so->rx_opt, cap_len);
@@ -606,6 +630,7 @@ pfq_create(
 
         sk_refcnt_debug_inc(sk);
 
+        up (&sock_sem);
         return 0;
 }
 
@@ -634,21 +659,13 @@ pfq_release(struct socket *sock)
 {
         struct sock * sk = sock->sk;
         struct pfq_sock * so;
-        int id;
+        int id, total = 0;
 
 	if (!sk)
 		return 0;
 
         so = pfq_sk(sk);
         id = so->id;
-
-        pr_devel("[PFQ|%d] releasing socket...\n", id);
-
-        pfq_rx_release(&so->rx_opt);
-        pfq_tx_release(&so->tx_opt);
-
-        pfq_leave_all_groups(so->id);
-        pfq_release_sock_id(so->id);
 
         /* stop TX thread (if running) */
 
@@ -659,14 +676,66 @@ pfq_release(struct socket *sock)
                 so->tx_opt.thread = NULL;
         }
 
+        pr_devel("[PFQ|%d] releasing socket...\n", id);
 
-        /* Convenient way to avoid a race condition with NAPI threads,
+        pfq_rx_release(&so->rx_opt);
+        pfq_tx_release(&so->tx_opt);
+
+        pfq_leave_all_groups(so->id);
+
+        pfq_release_sock_id(so->id);
+
+        down(&sock_sem);
+
+        /* disable skb recycler if no sockets are open */
+
+#ifdef PFQ_USE_SKB_RECYCLE
+        if (pfq_get_sock_count() == 0)
+        {
+                pfq_skb_recycle_enable(false);
+        }
+#endif
+
+        /* Convenient way to avoid a race condition with NAPI soft-irq,
          * without using expensive rw-mutexes
          */
 
         msleep(Q_GRACE_PERIOD);
 
-        pfq_queue_free(so);
+        /* purge the queues if no sockets are open */
+
+        if (pfq_get_sock_count() == 0)
+        {
+                total += pfq_prefetch_purge_all();
+
+#ifdef PFQ_USE_SKB_RECYCLE
+                total += pfq_skb_recycle_purge();
+
+                pfq_skb_recycle_enable(true);
+#endif
+        }
+
+        up (&sock_sem);
+
+        if (total)
+	{
+#ifdef PFQ_USE_SKB_RECYCLE_STAT
+
+                struct pfq_recycle_stat stat = pfq_get_recycle_stats();
+                printk(KERN_INFO "[PFQ|%d] recycle_stat { os_alloc:%llu os_free:%llu rc_alloc:%llu rc_free:%llu error:%llu }\n",
+                                        id,
+                                        stat.os_alloc,
+                                        stat.os_free,
+                                        stat.rc_alloc,
+                                        stat.rc_free,
+                                        stat.rc_error);
+
+                pfq_reset_recycle_stats();
+#endif
+                printk(KERN_INFO "[PFQ|%d] cleanup: %d skb purged.\n", id, total);
+        }
+
+        pfq_shared_queue_free(so);
 
         sock_orphan(sk);
 	sock->sk = NULL;
@@ -872,10 +941,16 @@ static int __init pfq_init_module(void)
         pfq_proto_ops_init();
         pfq_proto_init();
 
-        if (prefetch_len > Q_PREFETCH_MAX_LEN) {
-                printk(KERN_INFO "[PFQ] prefetch_len=%d not allowed (max=%zu)!\n", prefetch_len, (sizeof(unsigned long) << 3)-1);
+        if (prefetch_len > Q_NON_INTRUSIVE_MAX_LEN || prefetch_len == 0) {
+                printk(KERN_INFO "[PFQ] prefetch_len=%d not allowed (0,%zu)!\n", prefetch_len, Q_NON_INTRUSIVE_MAX_LEN);
                 return -EFAULT;
         }
+        
+	if (batch_len > Q_NON_INTRUSIVE_MAX_LEN || batch_len == 0) { 
+                printk(KERN_INFO "[PFQ] batch_len=%d not allowed (0,%zu)!\n", batch_len, Q_NON_INTRUSIVE_MAX_LEN);
+                return -EFAULT;
+        }
+
 
 	/* create a per-cpu context */
 	cpu_data = alloc_percpu(struct local_data);
@@ -883,19 +958,6 @@ static int __init pfq_init_module(void)
                 printk(KERN_WARNING "[PFQ] out of memory!\n");
 		return -ENOMEM;
         }
-
-#ifdef PFQ_USE_SKB_RECYCLE
-        {
-                int cpu;
-
-                /* setup skb-recycle list */
-
-                for_each_possible_cpu(cpu) {
-                        struct local_data *this_cpu = per_cpu_ptr(cpu_data, cpu);
-                        skb_queue_head_init(&this_cpu->recycle_list);
-                }
-        }
-#endif
 
         /* register pfq sniffer protocol */
         n = proto_register(&pfq_proto, 0);
@@ -912,6 +974,12 @@ static int __init pfq_init_module(void)
 
 	pfq_function_factory_init();
 
+#ifdef PFQ_USE_SKB_RECYCLE
+        pfq_skb_recycle_init();
+        pfq_skb_recycle_enable(true);
+        printk(KERN_INFO "[PFQ] skb recycle initialized.\n");
+#endif
+
 	printk(KERN_INFO "[PFQ] ready!\n");
         return 0;
 }
@@ -919,7 +987,7 @@ static int __init pfq_init_module(void)
 
 static void __exit pfq_exit_module(void)
 {
-        int cpu;
+        int total = 0;
 
         /* unregister the basic device handler */
         unregister_device_handler();
@@ -936,28 +1004,15 @@ static void __exit pfq_exit_module(void)
         /* wait grace period */
         msleep(Q_GRACE_PERIOD);
 
-        /* destroy pipeline queues (of each cpu) */
+        /* purge both pre-fetch and recycles queues */
 
-        for_each_possible_cpu(cpu) {
-
-                struct local_data *local = per_cpu_ptr(cpu_data, cpu);
-                struct pfq_prefetch_skb *this_queue = &local->prefetch_queue;
-                struct sk_buff *skb;
-		int n = 0;
-		queue_for_each(skb, n, this_queue)
-		{
-                        struct pfq_annotation *cb = pfq_skb_annotation(skb);
-                        if (unlikely(cb->stolen_skb))
-                                continue;
-                 	kfree_skb(skb);
-		}
-
-       		pfq_prefetch_skb_flush(this_queue);
+        total += pfq_prefetch_purge_all();
 
 #ifdef PFQ_USE_SKB_RECYCLE
-                skb_queue_purge(&local->recycle_list);
+        total += pfq_skb_recycle_purge();
 #endif
-        }
+        if (total)
+                printk(KERN_INFO "[PFQ] %d skbuff freed.\n", total);
 
         /* free per-cpu data */
 	free_percpu(cpu_data);

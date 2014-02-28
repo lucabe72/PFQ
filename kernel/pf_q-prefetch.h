@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * (C) 2011-13 Nicola Bonelli <nicola.bonelli@cnit.it>
+ * (C) 2014 Nicola Bonelli <nicola.bonelli@cnit.it>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,18 +21,9 @@
  *
  ****************************************************************/
 
-#ifndef _PF_Q_BITS_H_
-#define _PF_Q_BITS_H_
+#ifndef _PF_Q_PREFETCH_H_
+#define _PF_Q_PREFETCH_H_
 
+int pfq_prefetch_purge_all(void);
 
-#define pfq_ctz(n) \
-	 __builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned int),            (unsigned int)__builtin_ctz(n), \
-         __builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned long),       (unsigned int)__builtin_ctzl(n), \
-         __builtin_choose_expr(__builtin_types_compatible_p(typeof(n),unsigned long long),  (unsigned int)__builtin_ctzll(n), (void)0 )))
-
-
-#define bitwise_foreach(mask, n) \
-	for(; n = mask & -mask, mask ; mask^=n)
-
-
-#endif /* _PF_Q_BITS_H_ */
+#endif /* _PF_Q_PREFETCH_H_ */

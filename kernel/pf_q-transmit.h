@@ -25,8 +25,16 @@
  *
  */
 
+#ifndef _PF_Q_TRANSMIT_H_
+#define _PF_Q_TRANSMIT_H_
 
 #include <linux/skbuff.h>
+#include <linux/netdevice.h>
 
+#include <pf_q-non-intrusive.h>
+#include <pf_q-sock.h>
 
-extern int pfq_queue_xmit(struct sk_buff *skb, int txq);
+extern int pfq_tx_queue_flush(struct pfq_tx_opt *to, struct net_device *dev, int cpu, int node);
+extern int pfq_queue_xmit(struct pfq_non_intrusive_skb *skbs, struct net_device *dev, int queue_index);
+
+#endif /* _PF_Q_TRANSMIT_H_ */

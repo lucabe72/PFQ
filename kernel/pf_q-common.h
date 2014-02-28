@@ -30,13 +30,15 @@
 
 #include <pf_q-sparse-counter.h>
 
-#define Q_MAX_CPU               (sizeof(long)<<3)
-#define Q_MAX_ID                (sizeof(long)<<3)
-#define Q_MAX_GROUP             (sizeof(long)<<3)
-#define Q_PREFETCH_MAX_LEN      (sizeof(long)<<3)
+#define Q_MAX_CPU                (sizeof(long)<<3)
+#define Q_MAX_ID                 (sizeof(long)<<3)
+#define Q_MAX_GROUP              (sizeof(long)<<3)
+
+#define Q_NON_INTRUSIVE_MAX_LEN  (sizeof(long)<<3)
 
 #define Q_MAX_DEVICE            256
 #define Q_MAX_DEVICE_MASK       (Q_MAX_DEVICE-1)
+
 #define Q_MAX_HW_QUEUE          256
 #define Q_MAX_HW_QUEUE_MASK     (Q_MAX_HW_QUEUE-1)
 
@@ -44,18 +46,26 @@
 
 #define Q_TX_RING_SIZE          (8192)
 #define Q_TX_RING_MASK          (PFQ_TX_RING_SIZE-1)
+
 #define Q_SLOT_ALIGN(s, n)      ((s+(n-1)) & ~(n-1))
 
 
 /* sparse_counter_t stats */
 
-typedef struct pfq_kstats
+typedef struct pfq_rx_stats
 {
-    sparse_counter_t  recv;    /* received by the queue */
-    sparse_counter_t  lost;    /* packets lost due to queue congestion */
-    sparse_counter_t  drop;    /* dropped by filters */
+        sparse_counter_t  recv;         /* received by the queue */
+        sparse_counter_t  lost;         /* packets lost due to queue congestion */
+        sparse_counter_t  drop;         /* dropped by filters */
+} pfq_rx_stat_t;
 
-} pfq_kstat_t;
+
+typedef struct pfq_tx_stats
+{
+        sparse_counter_t  sent;         /* sent by the driver */
+        sparse_counter_t  disc;         /* discarded by the driver */
+
+} pfq_tx_stat_t;
 
 
 #endif /* _PF_COMMON_H_ */
